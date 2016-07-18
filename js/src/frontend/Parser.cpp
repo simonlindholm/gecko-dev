@@ -174,8 +174,10 @@ ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(ParseContext* p
         }
     }
 
-    for (uint32_t i = 0; i < paramNames.length(); i++)
+    for (uint32_t i = 0; i < paramNames.length(); i++) {
+        pc->removeFromHashSet(paramNames[i]);
         varScope.declared().remove(paramNames[i]);
+    }
 
     return true;
 }
@@ -190,8 +192,10 @@ ParseContext::Scope::removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom*
          scope = scope->enclosing())
     {
         if (DeclaredNamePtr p = scope->declared().lookup(name)) {
-            if (p->value()->kind() == DeclarationKind::VarForAnnexBLexicalFunction)
+            if (p->value()->kind() == DeclarationKind::VarForAnnexBLexicalFunction) {
+                pc->removeFromHashSet(name);
                 scope->declared().remove(p);
+            }
         }
     }
 
@@ -201,10 +205,11 @@ ParseContext::Scope::removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom*
 }
 
 void
-ParseContext::Scope::removeSimpleCatchParameter(JSAtom* name)
+ParseContext::Scope::removeSimpleCatchParameter(ParseContext* pc, JSAtom* name)
 {
     DeclaredNamePtr p = declared().lookup(name);
     MOZ_ASSERT(p && p->value()->kind() == DeclarationKind::SimpleCatchParameter);
+    pc->removeFromHashSet(name);
     declared().remove(p);
 }
 
@@ -212,6 +217,7 @@ void
 ParseContext::Scope::propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc)
 {
     for (BindingIter bi = bindings(pc); bi; bi++) {
+        pc->removeFromHashSet(bi.name());
         if (UsedNameSet::Ptr p = pc->usedNames_->lookup(bi.name())) {
             if (p->value()->usedFromInnerFunction())
                 bi.setClosedOver();
@@ -328,6 +334,18 @@ ParseContext::init()
     return true;
 }
 
+void
+ParseContext::removeFromHashSet(JSAtom* name)
+{
+    declaredNames_.remove(name);
+}
+
+void
+ParseContext::addToHashSet(JSAtom* name)
+{
+    declaredNames_.add(name);
+}
+
 bool
 ParseContext::noteUsedName(LifoAlloc& alloc, JSAtom* name)
 {
@@ -350,6 +368,14 @@ ParseContext::noteUsedName(LifoAlloc& alloc, JSAtom* name)
     }
 
     return true;
+}
+
+bool
+ParseContext::maybeNoteUsedName(LifoAlloc& alloc, JSAtom* name)
+{
+    if (declaredNames_.isDefinitelyIncluded(name))
+        return true;
+    return noteUsedName(alloc, name);
 }
 
 bool
@@ -1857,7 +1883,7 @@ Parser<ParseHandler>::newInternalDotName(HandlePropertyName name)
     Node nameNode = newName(name);
     if (!nameNode)
         return null();
-    if (!noteUsedName(name))
+    if (!pc->maybeNoteUsedName(alloc, name))
         return null();
     return nameNode;
 }
@@ -5935,7 +5961,7 @@ Parser<ParseHandler>::catchBlockStatement(YieldHandling yieldHandling,
 
         // The catch parameter name is not bound in this scope, so remove it
         // before generating bindings.
-        scope.removeSimpleCatchParameter(simpleCatchParam);
+        scope.removeSimpleCatchParameter(pc, simpleCatchParam);
 
         body = finishLexicalScope(scope, list);
     } else {
@@ -7858,7 +7884,7 @@ Parser<ParseHandler>::identifierName(YieldHandling yieldHandling)
     if (!pn)
         return null();
 
-    if (!pc->inDeclDestructuring && !noteUsedName(name))
+    if (!pc->inDeclDestructuring && !pc->maybeNoteUsedName(alloc, name))
         return null();
 
     return pn;

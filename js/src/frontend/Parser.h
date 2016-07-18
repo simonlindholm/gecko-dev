@@ -13,6 +13,8 @@
 
 #include "jspubtd.h"
 
+#include "ds/BloomishSet.h"
+
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FullParseHandler.h"
 #include "frontend/NameMaps.h"
@@ -163,6 +165,7 @@ class ParseContext : public Nestable<ParseContext>
         MOZ_MUST_USE bool addDeclaredName(ParseContext* pc, AddDeclaredNamePtr& p, JSAtom* name,
                                           DeclarationKind kind)
         {
+            pc->addToHashSet(name);
             return maybeReportOOM(pc, declared().add(p, name, DeclaredNameInfo(kind)));
         }
 
@@ -176,7 +179,7 @@ class ParseContext : public Nestable<ParseContext>
 
         // Remove a simple catch parameter name. Used to implement the odd
         // semantics of Annex B.3.5.
-        void removeSimpleCatchParameter(JSAtom* name);
+        void removeSimpleCatchParameter(ParseContext* pc, JSAtom* name);
 
         // Propagate all free names from the current scope to the enclosing
         // scope. Binding names that are used names from an inner function are
@@ -308,6 +311,8 @@ class ParseContext : public Nestable<ParseContext>
     // the nearest super scope as needing a home object.
     bool superScopeNeedsHomeObject_;
 
+    BloomishSet declaredNames_;
+
   public:
     // lastYieldOffset stores the offset of the last yield that was parsed.
     // NoYieldOffset is its initial value.
@@ -378,10 +383,13 @@ class ParseContext : public Nestable<ParseContext>
 
     MOZ_MUST_USE bool init();
     MOZ_MUST_USE bool noteUsedName(LifoAlloc& alloc, JSAtom* name);
+    MOZ_MUST_USE bool maybeNoteUsedName(LifoAlloc& alloc, JSAtom* name);
     MOZ_MUST_USE bool addClosedOverNames(LifoAlloc& alloc, ParseContext* innerpc);
     MOZ_MUST_USE bool addClosedOverNames(LifoAlloc& alloc, LazyScript* lazy);
     MOZ_MUST_USE bool collectFreeNames(MutableHandle<GCVector<JSAtom*>> freeVariables);
     bool hasFreeName(JSAtom* name) const;
+    void addToHashSet(JSAtom* name);
+    void removeFromHashSet(JSAtom* name);
     void finishFunctionBodyScope();
     void finishExtraFunctionScopes();
 
