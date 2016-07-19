@@ -31,6 +31,9 @@ class InlineTable
     using TableRange  = typename Table::Range;
     using Lookup      = typename HashPolicy::Lookup;
 
+    static_assert(InlineEntries < 256, "we're using uint8_t, with 0xff as sentinel");
+    uint8_t firstSearchPos_[16];
+
     size_t      inlNext_;
     size_t      inlCount_;
     InlineEntry inl_[InlineEntries];
@@ -43,6 +46,10 @@ class InlineTable
         return !!key;
     }
 #endif
+
+    uint32_t fastHash(void* key) {
+        return (0x9E3779B9U * (uint32_t)(uintptr_t)key) >> 28;
+    }
 
     InlineEntry* inlineStart() {
         MOZ_ASSERT(!usingTable());
@@ -106,7 +113,9 @@ class InlineTable
       : inlNext_(0),
         inlCount_(0),
         table_(a)
-    { }
+    {
+        memset(firstSearchPos_, 0xff, sizeof firstSearchPos_);
+    }
 
     class Ptr
     {
@@ -246,6 +255,7 @@ class InlineTable
     void clear() {
         inlNext_ = 0;
         inlCount_ = 0;
+        memset(firstSearchPos_, 0xff, sizeof firstSearchPos_);
     }
 
     MOZ_ALWAYS_INLINE
@@ -255,10 +265,22 @@ class InlineTable
         if (usingTable())
             return Ptr(table_.lookup(l));
 
+        uint32_t h = fastHash((void*)l);
+        size_t ind = firstSearchPos_[h];
+        if (ind != 0xff) {
+            InlineEntry* it = inlineStart() + ind;
+            if (HashPolicy::match(it->key, l))
+                return Ptr(it);
+        } else {
+            return Ptr(nullptr);
+        }
+
         InlineEntry* end = inlineEnd();
         for (InlineEntry* it = inlineStart(); it != end; ++it) {
-            if (it->key && HashPolicy::match(it->key, l))
+            if (it->key && HashPolicy::match(it->key, l)) {
+                firstSearchPos_[h] = (uint8_t)(it - inlineStart());
                 return Ptr(it);
+            }
         }
 
         return Ptr(nullptr);
@@ -271,10 +293,22 @@ class InlineTable
         if (usingTable())
             return AddPtr(table_.lookupForAdd(l));
 
+        uint32_t h = fastHash((void*)l);
+        size_t ind = firstSearchPos_[h];
+        if (ind != 0xff) {
+            InlineEntry* it = inlineStart() + ind;
+            if (HashPolicy::match(it->key, l))
+                return AddPtr(it, true);
+        } else {
+            return AddPtr(inlineEnd(), false);
+        }
+
         InlineEntry* end = inlineEnd();
         for (InlineEntry* it = inlineStart(); it != end; ++it) {
-            if (it->key && HashPolicy::match(it->key, l))
+            if (it->key && HashPolicy::match(it->key, l)) {
+                firstSearchPos_[h] = (uint8_t)(it - inlineStart());
                 return AddPtr(it, true);
+            }
         }
 
         // The add pointer that's returned here may indicate the limit entry of
@@ -306,6 +340,9 @@ class InlineTable
             MOZ_ASSERT(uintptr_t(inlineEnd()) == uintptr_t(p.inlAddPtr_));
             addPtr->update(mozilla::Forward<KeyInput>(key),
                            mozilla::Forward<Args>(args)...);
+
+            firstSearchPos_[fastHash((void*)key)] = (uint8_t)(addPtr - inlineStart());
+
             ++inlCount_;
             ++inlNext_;
             return true;

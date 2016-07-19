@@ -13,7 +13,6 @@
 #include "jsopcode.h"
 #include "jsscript.h"
 
-#include "ds/InlineTable.h"
 #include "frontend/Parser.h"
 #include "frontend/SharedContext.h"
 #include "frontend/SourceNotes.h"

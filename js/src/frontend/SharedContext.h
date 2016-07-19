@@ -14,7 +14,6 @@
 #include "jstypes.h"
 
 #include "builtin/ModuleObject.h"
-#include "ds/InlineTable.h"
 #include "frontend/ParseNode.h"
 #include "frontend/TokenStream.h"
 #include "vm/EnvironmentObject.h"
